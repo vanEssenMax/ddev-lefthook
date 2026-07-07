@@ -1,7 +1,20 @@
 name: lefthook
 
 project_files:
-  - commands/host/install-hooks
+  - commands/host/lefthook
   - config.lefthook.yaml
 
 ddev_version_constraint: '>= v1.24.10'
+
+post_install_actions:
+  - |
+    #ddev-description:Explain the next step
+    echo "lefthook hooks will be wired on the next 'ddev start' (or 'ddev restart')."
+    echo "Optional installer preference: ddev dotenv set .ddev/.env.lefthook --lefthook-installer 'bun,brew'"
+
+removal_actions:
+  - |
+    #ddev-description:Unwire the lefthook git hooks
+    if command -v lefthook >/dev/null 2>&1; then
+      (cd "${DDEV_APPROOT}" && lefthook uninstall) || true
+    fi

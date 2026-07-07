@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+
+#ddev-generated
+## Description: Run lefthook on the host; bare invocation wires the git hooks, installing the binary when missing
+## Usage: lefthook [lefthook-args]
+## Example: "ddev lefthook" or "ddev lefthook run pre-commit"
+
+# Runs on the host (git commits happen there, so the hooks must live there).
+#
+# Two modes:
+# - Bare "ddev lefthook" is the gentle bootstrap the post-start hook in
+#   .ddev/config.lefthook.yaml calls: it installs the binary when missing,
+#   wires .git/hooks, and never fails ddev start; problems are warnings.
+# - With arguments it is a passthrough to the lefthook binary (after the
+#   same ensure-binary step) with honest exit codes, so scripting against
+#   "ddev lefthook run pre-commit" behaves like the real thing.
+#
+# Optional configuration via .ddev/.env.lefthook:
+#   ddev dotenv set .ddev/.env.lefthook --lefthook-installer "bun,brew"
+# LEFTHOOK_INSTALLER is "auto" (default), "none", or a comma-separated probe
+# list drawn from: brew, bun, npm, winget. The first manager present on the
+# host is used to install the lefthook binary globally.
+
+GENTLE=0
+[ $# -eq 0 ] && GENTLE=1
+
+# In gentle mode problems must never break ddev start; in passthrough mode
+# they are real errors.
+bail() {
+  [ "$GENTLE" -eq 1 ] && exit 0
+  exit 1
+}
+
+# Output colors: dim for no-op noise, yellow for actionable warnings.
+DIM=$'\033[2m'
+YELLOW=$'\033[33m'
+RESET=$'\033[0m'
+[ -n "${NO_COLOR:-}" ] && DIM="" YELLOW="" RESET=""
+
+cd "$DDEV_APPROOT" || bail
+
+# shellcheck source=/dev/null
+[ -f .ddev/.env.lefthook ] && . .ddev/.env.lefthook
+
+# Worktrees and submodules have a .git file instead of a directory, and in a
+# monorepo the repo root sits above the approot; resolve the real root
+# instead of testing for a .git directory, and run lefthook from there.
+GIT_TOP="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$GIT_TOP" ]; then
+  echo "${DIM}not inside a git checkout, skipping lefthook setup${RESET}"
+  bail
+fi
+cd "$GIT_TOP" || bail
+
+INSTALLER="${LEFTHOOK_INSTALLER:-auto}"
+[ "$INSTALLER" = "auto" ] && INSTALLER="brew,bun,npm,winget"
+
+install_with() {
+  case "$1" in
+    brew) brew install lefthook ;;
+    bun) bun add -g lefthook ;;
+    npm) npm install -g lefthook ;;
+    winget) winget install --exact --id evilmartians.lefthook ;;
+  esac
+}
+
+# A fresh global install may not be resolvable in this shell yet; fall back
+# to the managers' global bin dirs explicitly.
+resolve_binary() {
+  LEFTHOOK_BIN="$(command -v lefthook || true)"
+  if [ -z "$LEFTHOOK_BIN" ] && [ -x "$HOME/.bun/bin/lefthook" ]; then
+    LEFTHOOK_BIN="$HOME/.bun/bin/lefthook"
+  fi
+  if [ -z "$LEFTHOOK_BIN" ] && command -v npm >/dev/null 2>&1; then
+    npm_candidate="$(npm prefix -g 2>/dev/null)/bin/lefthook"
+    [ -x "$npm_candidate" ] && LEFTHOOK_BIN="$npm_candidate"
+  fi
+}
+
+resolve_binary
+
+if [ -n "$LEFTHOOK_BIN" ]; then
+  [ "$GENTLE" -eq 1 ] && echo "${DIM}lefthook already installed (${LEFTHOOK_BIN}), skipping binary install${RESET}"
+elif [ "$INSTALLER" != "none" ]; then
+  IFS=',' read -ra managers <<<"$INSTALLER"
+  for manager in "${managers[@]}"; do
+    manager="${manager//[[:space:]]/}"
+    case "$manager" in
+      brew | bun | npm | winget) ;;
+      *)
+        echo "${YELLOW}WARNING: unknown LEFTHOOK_INSTALLER entry '${manager}', skipping${RESET}" >&2
+        continue
+        ;;
+    esac
+    if command -v "$manager" >/dev/null 2>&1; then
+      echo "lefthook not found, installing via ${manager}..."
+      install_with "$manager"
+      resolve_binary
+      break
+    fi
+  done
+fi
+
+if [ -z "$LEFTHOOK_BIN" ]; then
+  echo "${YELLOW}WARNING: lefthook is not installed.${RESET}" >&2
+  echo "${YELLOW}Install it (for example 'brew install lefthook' or 'npm i -g lefthook';${RESET}" >&2
+  echo "${YELLOW}all options: https://lefthook.dev/installation/), then run 'ddev lefthook'.${RESET}" >&2
+  bail
+fi
+
+# Passthrough mode: hand over to the real binary, exit code and all.
+if [ "$GENTLE" -eq 0 ]; then
+  exec "$LEFTHOOK_BIN" "$@"
+fi
+
+# Bare invocation: idempotent bootstrap. (Re)writes the .git/hooks stubs and
+# creates a commented example lefthook.yml when the project has no config yet.
+if ! "$LEFTHOOK_BIN" install; then
+  echo "${YELLOW}WARNING: 'lefthook install' failed; run 'ddev lefthook' to retry.${RESET}" >&2
+fi
+exit 0
