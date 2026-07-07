@@ -1,6 +1,7 @@
 name: lefthook
 
 project_files:
-  - docker-compose.lefthook.yaml
+  - commands/host/install-hooks
+  - config.lefthook.yaml
 
 ddev_version_constraint: '>= v1.24.10'

@@ -15,7 +15,6 @@
 setup() {
   set -eu -o pipefail
 
-  # Override this variable for your add-on:
   export GITHUB_REPO=vanEssenMax/ddev-lefthook
 
   TEST_BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
@@ -32,6 +31,8 @@ setup() {
   export DDEV_NO_INSTRUMENTATION=true
   ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
   cd "${TESTDIR}"
+  # The add-on manages git hooks, so the test project must be a git checkout.
+  git init -q .
   run ddev config --project-name="${PROJNAME}" --project-tld=ddev.site
   assert_success
   run ddev start -y
@@ -39,17 +40,19 @@ setup() {
 }
 
 health_checks() {
-  # Do something useful here that verifies the add-on
-
-  # You can check for specific information in headers:
-  # run curl -sfI https://${PROJNAME}.ddev.site
-  # assert_output --partial "HTTP/2 200"
-  # assert_output --partial "test_header"
-
-  # Or check if some command gives expected output:
-  DDEV_DEBUG=true run ddev launch
+  # Add-on files landed with the ddev-generated marker.
+  assert_file_exist .ddev/commands/host/install-hooks
+  assert_file_exist .ddev/config.lefthook.yaml
+  run grep -q '#ddev-generated' .ddev/commands/host/install-hooks
   assert_success
-  assert_output --partial "FULLURL https://${PROJNAME}.ddev.site"
+  run grep -q '#ddev-generated' .ddev/config.lefthook.yaml
+  assert_success
+  # The post-start hook ran install-hooks: lefthook generated its example
+  # config and wrote its always-on stub into .git/hooks.
+  assert_file_exist lefthook.yml
+  assert_file_exist .git/hooks/prepare-commit-msg
+  run grep -q lefthook .git/hooks/prepare-commit-msg
+  assert_success
 }
 
 teardown() {
@@ -72,6 +75,46 @@ teardown() {
   run ddev restart -y
   assert_success
   health_checks
+}
+
+@test "syncs hooks from an existing project config" {
+  set -eu -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  cat > .lefthook.yml <<'EOF'
+pre-commit:
+  jobs:
+    - name: noop
+      run: "true"
+EOF
+  run ddev restart -y
+  assert_success
+  # The configured pre-commit hook got a stub.
+  assert_file_exist .git/hooks/pre-commit
+  run grep -q lefthook .git/hooks/pre-commit
+  assert_success
+  # The existing config is respected: no example file generated next to it.
+  assert_file_not_exist lefthook.yml
+}
+
+@test "installer none never fails ddev restart" {
+  set -eu -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  run ddev dotenv set .ddev/.env.lefthook --lefthook-installer none
+  assert_success
+  run ddev restart -y
+  assert_success
+}
+
+@test "remove deletes the add-on files" {
+  set -eu -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  run ddev add-on remove lefthook
+  assert_success
+  assert_file_not_exist .ddev/commands/host/install-hooks
+  assert_file_not_exist .ddev/config.lefthook.yaml
 }
 
 # bats test_tags=release

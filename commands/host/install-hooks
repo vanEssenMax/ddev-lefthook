@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+
+#ddev-generated
+## Description: Install the lefthook git hooks (installs the lefthook binary when missing)
+## Usage: install-hooks
+## Example: "ddev install-hooks"
+
+# Runs on the host (git commits happen there, so the hooks must live there).
+# Called automatically by the post-start hook in .ddev/config.lefthook.yaml;
+# safe to run manually at any time. Never fails ddev start: every branch
+# exits 0 and problems are reported as warnings.
+#
+# Optional configuration via .ddev/.env.lefthook:
+#   ddev dotenv set .ddev/.env.lefthook --lefthook-installer "bun,brew"
+# LEFTHOOK_INSTALLER is "auto" (default), "none", or a comma-separated probe
+# list drawn from: brew, bun, npm. The first manager present on the host is
+# used to install the lefthook binary globally.
+
+cd "$DDEV_APPROOT" || exit 0
+
+# Output colors: dim for no-op noise, yellow for actionable warnings.
+DIM=$'\033[2m'
+YELLOW=$'\033[33m'
+RESET=$'\033[0m'
+[ -n "${NO_COLOR:-}" ] && DIM="" YELLOW="" RESET=""
+
+if [ ! -d .git ]; then
+  echo "${DIM}not a git checkout, skipping lefthook setup${RESET}"
+  exit 0
+fi
+
+# shellcheck source=/dev/null
+[ -f .ddev/.env.lefthook ] && . .ddev/.env.lefthook
+
+INSTALLER="${LEFTHOOK_INSTALLER:-auto}"
+[ "$INSTALLER" = "auto" ] && INSTALLER="brew,bun,npm"
+
+install_with() {
+  case "$1" in
+    brew) brew install lefthook ;;
+    bun) bun add -g lefthook ;;
+    npm) npm install -g lefthook ;;
+  esac
+}
+
+# A fresh global install may not be resolvable in this shell yet; fall back
+# to the managers' global bin dirs explicitly.
+resolve_binary() {
+  LEFTHOOK_BIN="$(command -v lefthook || true)"
+  if [ -z "$LEFTHOOK_BIN" ] && [ -x "$HOME/.bun/bin/lefthook" ]; then
+    LEFTHOOK_BIN="$HOME/.bun/bin/lefthook"
+  fi
+  if [ -z "$LEFTHOOK_BIN" ] && command -v npm >/dev/null 2>&1; then
+    npm_candidate="$(npm prefix -g 2>/dev/null)/bin/lefthook"
+    [ -x "$npm_candidate" ] && LEFTHOOK_BIN="$npm_candidate"
+  fi
+}
+
+resolve_binary
+
+if [ -n "$LEFTHOOK_BIN" ]; then
+  echo "${DIM}lefthook already installed (${LEFTHOOK_BIN}), skipping binary install${RESET}"
+elif [ "$INSTALLER" != "none" ]; then
+  IFS=',' read -ra managers <<<"$INSTALLER"
+  for manager in "${managers[@]}"; do
+    manager="${manager//[[:space:]]/}"
+    case "$manager" in
+      brew | bun | npm) ;;
+      *)
+        echo "${YELLOW}WARNING: unknown LEFTHOOK_INSTALLER entry '${manager}', skipping${RESET}" >&2
+        continue
+        ;;
+    esac
+    if command -v "$manager" >/dev/null 2>&1; then
+      echo "lefthook not found, installing via ${manager}..."
+      install_with "$manager"
+      resolve_binary
+      break
+    fi
+  done
+fi
+
+if [ -z "$LEFTHOOK_BIN" ]; then
+  echo "${YELLOW}WARNING: lefthook is not installed.${RESET}" >&2
+  echo "${YELLOW}Install it (for example 'brew install lefthook' or 'npm i -g lefthook'), then run 'ddev install-hooks'.${RESET}" >&2
+  exit 0
+fi
+
+# Idempotent: (re)writes the .git/hooks stubs; creates a commented example
+# lefthook.yml when the project has no lefthook config yet.
+if ! "$LEFTHOOK_BIN" install; then
+  echo "${YELLOW}WARNING: 'lefthook install' failed; run 'ddev install-hooks' to retry.${RESET}" >&2
+fi
+exit 0
