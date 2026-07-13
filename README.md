@@ -19,7 +19,8 @@ This add-on removes the human from that loop. On every `ddev start` it:
    lefthook config, and
 3. lets lefthook drop its commented example `lefthook.yml` when the
    project has no config yet, so you start from something instead of
-   nothing.
+   nothing. (The example is all comments: no jobs run until you define
+   some.)
 
 Hooks run where commits happen: on the host. The web container never
 sees them, which is why this is a host command and not another service.
@@ -80,6 +81,24 @@ preference; leave it uncommitted to keep it personal.
 
 Already have lefthook on your `PATH`? Then none of this matters: the
 installer step is skipped entirely.
+
+## Pairs well with ddev-fallow
+
+[ddev-fallow](https://github.com/vanEssenMax/ddev-fallow) does for
+[fallow](https://docs.fallow.tools) what this add-on does for lefthook:
+installs the binary and wires the gates on every `ddev start`. With both
+add-ons in one project, lefthook owns `.git/hooks` (fallow detects your
+lefthook config and steps aside), and fallow's commit gate runs as a
+normal lefthook job:
+
+```yaml
+pre-push:
+  jobs:
+    - name: fallow-audit
+      run: fallow audit --base main
+```
+
+Adjust `--base` to your default branch.
 
 ## Releasing (maintainers)
 
