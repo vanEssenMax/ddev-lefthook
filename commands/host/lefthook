@@ -52,6 +52,21 @@ if [ -z "$GIT_TOP" ]; then
 fi
 cd "$GIT_TOP" || bail
 
+# core.hooksPath redirects git away from .git/hooks, where lefthook writes its
+# stubs, so with it set lefthook would never fire and nothing would say so. A
+# path that no longer exists is the leftover of a retired hook setup and gets
+# unset; an existing one is a deliberate choice and only gets a warning.
+HOOKS_PATH="$(git config --get core.hooksPath || true)"
+if [ -n "$HOOKS_PATH" ]; then
+  if [ -d "$HOOKS_PATH" ]; then
+    echo "${YELLOW}WARNING: core.hooksPath is set to '${HOOKS_PATH}', so git ignores the hooks lefthook installs.${RESET}" >&2
+    echo "${YELLOW}Run 'git config --unset core.hooksPath' to let lefthook manage the hooks.${RESET}" >&2
+  else
+    git config --unset core.hooksPath
+    echo "${DIM}unset core.hooksPath: it pointed at '${HOOKS_PATH}', which no longer exists${RESET}"
+  fi
+fi
+
 INSTALLER="${LEFTHOOK_INSTALLER:-auto}"
 [ "$INSTALLER" = "auto" ] && INSTALLER="brew,bun,npm,winget"
 

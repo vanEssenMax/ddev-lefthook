@@ -59,6 +59,13 @@ after it goes straight to the lefthook binary with honest exit codes:
 [lefthook CLI](https://lefthook.dev/usage/commands.html) understands.
 Either way the binary is installed first when missing.
 
+One thing it checks on the way: `core.hooksPath`. With that git setting
+present, git looks for hooks somewhere other than `.git/hooks`, so the
+stubs lefthook installs would never fire, and nothing would tell you. A
+path that no longer exists (the usual leftover of a retired hand-rolled
+hook directory) gets unset; a path that does exist is treated as your
+deliberate choice and only earns a warning with the unset command.
+
 ## Configuring the installer
 
 By default the add-on probes `brew`, `bun`, `npm`, and `winget`,
