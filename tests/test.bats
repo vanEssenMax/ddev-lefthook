@@ -111,6 +111,36 @@ EOF
   assert_success
 }
 
+@test "unsets a core.hooksPath that points at a missing directory" {
+  set -eu -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  # The leftover of a retired hand-rolled hook directory: git would look
+  # there, find nothing, and lefthook's stubs in .git/hooks would never run.
+  git config core.hooksPath .githooks
+  run ddev lefthook
+  assert_success
+  assert_output --partial "unset core.hooksPath"
+  run git config --get core.hooksPath
+  assert_failure
+  assert_file_exist .git/hooks/prepare-commit-msg
+}
+
+@test "warns about a core.hooksPath that points at an existing directory" {
+  set -eu -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  mkdir -p custom-hooks
+  git config core.hooksPath custom-hooks
+  run ddev lefthook
+  assert_success
+  assert_output --partial "core.hooksPath is set to 'custom-hooks'"
+  # A deliberate setting is never changed behind the user's back.
+  run git config --get core.hooksPath
+  assert_success
+  assert_output "custom-hooks"
+}
+
 @test "remove deletes the add-on files and unwires the hooks" {
   set -eu -o pipefail
   run ddev add-on get "${DIR}"
